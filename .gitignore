@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# logicd runtime state (would contain offsets, audit chain)
+*.db
+*.db-wal
+*.db-shm
+state/
+audit.log
+
+# config (may contain API key)
+dev-config.toml
+config.toml
+.env
+
+# editor
+.vscode/
+.idea/
+*.swp
+
+# harness/tooling scratch
+.tmp/
+.pytest_cache/

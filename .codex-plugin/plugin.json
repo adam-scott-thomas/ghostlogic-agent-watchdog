@@ -1,0 +1,39 @@
+{
+  "name": "ghostlogic-agent-watchdog",
+  "version": "0.1.0",
+  "description": "Monitors local AI-agent coding sessions, including Codex CLI and Claude Code, and ships tamper-evident work receipts to Blackbox.",
+  "author": {
+    "name": "Adam Thomas",
+    "email": "adamthomasdirect@gmail.com",
+    "url": "https://github.com/adam-scott-thomas"
+  },
+  "homepage": "https://github.com/adam-scott-thomas/ghostlogic-agent-watchdog",
+  "repository": "https://github.com/adam-scott-thomas/ghostlogic-agent-watchdog",
+  "license": "Apache-2.0",
+  "keywords": [
+    "forensics",
+    "telemetry",
+    "audit",
+    "codex",
+    "claude-code"
+  ],
+  "interface": {
+    "displayName": "GhostLogic Agent Watchdog",
+    "shortDescription": "Monitors local AI-agent coding sessions, including Codex CLI and Claude Code, and ships tamper-evident work receipts to Blackbox.",
+    "longDescription": "GhostLogic Agent Watchdog uses the logicd capture engine to monitor local AI-agent coding sessions, including Codex CLI and Claude Code, seal them into deterministic batches, preserve replay-safe durability, and ship tamper-evident work receipts to GhostLogic Blackbox.",
+    "developerName": "Adam Thomas",
+    "category": "Security",
+    "capabilities": [
+      "Interactive",
+      "Monitoring",
+      "Installation"
+    ],
+    "websiteURL": "https://github.com/adam-scott-thomas/ghostlogic-agent-watchdog",
+    "defaultPrompt": [
+      "Install GhostLogic Agent Watchdog on this machine and show me the generated service steps.",
+      "Explain how GhostLogic Agent Watchdog preserves supported agent transcript durability.",
+      "Audit this GhostLogic Agent Watchdog config for risky settings before I deploy it."
+    ],
+    "brandColor": "#0F766E"
+  }
+}

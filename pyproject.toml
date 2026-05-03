@@ -1,0 +1,105 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ghostlogic-agent-watchdog"
+version = "0.1.0"
+description = "Forensic forwarder for AI-agent coding sessions (Claude Code, Codex CLI). Tick-batches transcripts and ships tamper-evident receipts to GhostLogic Blackbox."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Adam Thomas", email = "adamthomasdirect@gmail.com"},
+]
+maintainers = [
+    {name = "Adam Thomas", email = "adamthomasdirect@gmail.com"},
+]
+keywords = [
+    "forensics",
+    "telemetry",
+    "audit",
+    "claude-code",
+    "codex-cli",
+    "ai-agents",
+    "evidence",
+    "logging",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: No Input/Output (Daemon)",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Information Technology",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: System :: Logging",
+    "Topic :: System :: Monitoring",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
+dependencies = [
+    "aiohttp>=3.9",
+    "watchdog>=4.0",
+    "ghostspine>=0.3.0",
+]
+
+[project.optional-dependencies]
+windows = ["pywin32>=306"]
+dev = [
+    "pytest>=7",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "build>=1.2",
+    "twine>=5.0",
+]
+
+[project.scripts]
+logicd = "logicd.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/adam-scott-thomas/ghostlogic-agent-watchdog"
+Repository = "https://github.com/adam-scott-thomas/ghostlogic-agent-watchdog"
+Issues = "https://github.com/adam-scott-thomas/ghostlogic-agent-watchdog/issues"
+Changelog = "https://github.com/adam-scott-thomas/ghostlogic-agent-watchdog/releases"
+"Bug Tracker" = "https://github.com/adam-scott-thomas/ghostlogic-agent-watchdog/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["logicd"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "logicd/",
+    "tests/",
+    ".codex-plugin/",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+exclude = [
+    ".git/",
+    ".pytest_cache/",
+    ".tmp/",
+    "dist/",
+    "build/",
+    "*.pyc",
+    "__pycache__/",
+    "*.egg-info/",
+    ".venv/",
+    "dev-config.toml",
+    "*.db",
+    "audit.log",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
