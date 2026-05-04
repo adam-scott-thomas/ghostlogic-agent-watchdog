@@ -29,8 +29,10 @@ class IngestClient:
         audit: AuditLog,
         dead_letter_dir: Path,
         max_concurrent: int = 3,
+        endpoint_id: str = "",
     ):
         self.api_url = api_url
+        self.endpoint_id = endpoint_id  # F-WD-002: surface endpoint_id on the wire
         self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -65,6 +67,11 @@ class IngestClient:
             "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "events": events,
         }
+        # F-WD-002 (2026-05-01): emit endpoint_id when configured so the
+        # server can correlate batches by endpoint UUID instead of just
+        # hostname (which collides across virtualised endpoints).
+        if self.endpoint_id:
+            body["endpoint_id"] = self.endpoint_id
 
         async with self._sem:
             await self._post_with_retry(body, park_on_exhaustion=True)

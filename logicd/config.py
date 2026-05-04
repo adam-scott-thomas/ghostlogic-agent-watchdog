@@ -1,8 +1,78 @@
-"""Config loader. Reads TOML, never writes."""
+"""Config loader. Reads TOML, never writes.
+
+API-key resolution (audit F-WD-003, 2026-05-01):
+  Priority order on `Config.load`:
+    1. OS keyring entry under service `ghostlogic-agent-watchdog`,
+       username `api_key:<endpoint_id>` (or `api_key:default` when no
+       endpoint_id is configured yet).
+    2. Plain `api.key` literal in the TOML file (legacy / fallback).
+    3. KeyError if neither exists.
+
+  The `enroll` and `install` commands write to BOTH locations so that
+  freshly-enrolled agents work whether the keyring is reachable or not;
+  steady-state operation prefers the keyring. To migrate an existing
+  agent off plaintext TOML, run `python -m logicd migrate-key`.
+"""
 from __future__ import annotations
+import logging
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+try:
+    import keyring as _keyring
+except ImportError:  # graceful: fall through to TOML
+    _keyring = None  # type: ignore[assignment]
+
+KEYRING_SERVICE = "ghostlogic-agent-watchdog"
+
+
+def _keyring_username(endpoint_id: str) -> str:
+    return f"api_key:{endpoint_id or 'default'}"
+
+
+def read_api_key(endpoint_id: str, toml_fallback: str) -> str:
+    """Resolve api_key for the given endpoint_id. Prefers keyring."""
+    if _keyring is not None:
+        try:
+            value = _keyring.get_password(KEYRING_SERVICE, _keyring_username(endpoint_id))
+            if value:
+                return value
+        except Exception as e:  # keyring backend missing / locked
+            logging.getLogger(__name__).warning(
+                "Keyring read failed (%s); falling back to TOML literal", e
+            )
+    if toml_fallback:
+        return toml_fallback
+    raise RuntimeError(
+        "No API key found in keyring or TOML for endpoint_id="
+        f"{endpoint_id!r}. Run `logicd enroll` (or set api.key in the "
+        "config file) before starting the daemon."
+    )
+
+
+def write_api_key(endpoint_id: str, api_key: str) -> bool:
+    """Persist api_key to keyring. Returns True on success, False if
+    the keyring backend is unavailable (caller should still write to
+    TOML for compatibility in that case)."""
+    if _keyring is None:
+        return False
+    try:
+        _keyring.set_password(KEYRING_SERVICE, _keyring_username(endpoint_id), api_key)
+        return True
+    except Exception as e:
+        logging.getLogger(__name__).warning("Keyring write failed: %s", e)
+        return False
+
+
+def delete_api_key(endpoint_id: str) -> bool:
+    if _keyring is None:
+        return False
+    try:
+        _keyring.delete_password(KEYRING_SERVICE, _keyring_username(endpoint_id))
+        return True
+    except Exception:
+        return False
 
 
 # Defaults are conservative: payloads stay on the machine unless the
@@ -73,6 +143,11 @@ class Config:
     watches: tuple[WatchEntry, ...]
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
     heartbeat_seconds: int = 60
+    # endpoint_id: server-assigned UUID written to logicd.toml during
+    # `logicd enroll`. Empty string for legacy configs that pre-date
+    # endpoint isolation v1 (audit F-WD-002, 2026-05-01) — empty string
+    # signals "fall back to hostname-only identity on the wire".
+    endpoint_id: str = ""
 
     @staticmethod
     def load(path: str | Path) -> "Config":
@@ -98,9 +173,14 @@ class Config:
             include_default_redactions=bool(priv.get("include_default_redactions", True)),
             exclude_paths=tuple(priv.get("exclude_paths", ())),
         )
+        endpoint_id = str(api.get("endpoint_id", ""))
+        # Prefer keyring; fall back to TOML literal. See module docstring.
+        # `api.get("key", "")` because TOML may legitimately omit the
+        # literal once migrated to keyring.
+        resolved_api_key = read_api_key(endpoint_id, str(api.get("key", "")))
         return Config(
             api_url=api["url"].rstrip("/"),
-            api_key=api["key"],
+            api_key=resolved_api_key,
             state_dir=Path(raw["state_dir"]).expanduser(),
             audit_log=Path(raw["audit_log"]).expanduser(),
             tick_seconds=int(tick.get("seconds", 600)),
@@ -109,4 +189,5 @@ class Config:
             watches=watches,
             privacy=privacy,
             heartbeat_seconds=int(raw.get("heartbeat_seconds", 60)),
+            endpoint_id=endpoint_id,
         )

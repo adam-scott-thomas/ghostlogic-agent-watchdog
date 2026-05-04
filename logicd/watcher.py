@@ -109,6 +109,7 @@ class Forwarder:
                 audit=self.audit,
                 dead_letter_dir=dead_letter,
                 max_concurrent=self.cfg.max_concurrent_posts,
+                endpoint_id=self.cfg.endpoint_id,
             ) as client:
                 self._replay_dead_letter(dead_letter)
                 # Prime: pick up anything already on disk past the saved offset
