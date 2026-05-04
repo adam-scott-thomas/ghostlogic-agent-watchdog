@@ -149,6 +149,12 @@ def run_enroll(argv: list[str] | None = None) -> int:
     endpoint_id = resp["endpoint_id"]
     server_api_url = resp.get("api_url") or args.api_url
 
+    # Persist to OS keyring first (audit F-WD-003 hardening, 2026-05-01).
+    # If the keyring backend is unavailable on this host, the TOML
+    # literal below is still the authoritative copy.
+    from .config import write_api_key as _write_keyring
+    keyring_ok = _write_keyring(endpoint_id, plaintext)
+
     data_dir = Path(args.data_dir).expanduser() if args.data_dir else default_data_dir()
     cfg_path = _write_enrolled_config(
         data_dir=data_dir, agent_name=AGENT_NAME, api_url=server_api_url,
@@ -161,6 +167,16 @@ def run_enroll(argv: list[str] | None = None) -> int:
     print(f"  endpoint:  {resp['endpoint_name']}  ({endpoint_id})")
     print(f"  agent_id:  {resp['agent_id']}")
     print(f"  key:       {key_prefix}...   (full key shown once below)")
+    if keyring_ok:
+        print(f"  storage:   OS keyring (service=ghostlogic-agent-watchdog)")
+        print(f"             + TOML fallback at {cfg_path}")
+        print(f"             To remove the plaintext fallback once you've")
+        print(f"             confirmed the daemon starts:")
+        print(f"             python -m logicd migrate-key --commit")
+    else:
+        print(f"  storage:   TOML at {cfg_path}")
+        print(f"             (Keyring backend unavailable — the api.key")
+        print(f"              literal in the TOML file is authoritative.)")
     print(f"  types:     {', '.join(resp['allowed_event_types'])}")
     print(f"  config:    {cfg_path}")
     print(f"  acl lock:  {acl_desc}" + ("" if ok else "  (WARNING: not locked)"))

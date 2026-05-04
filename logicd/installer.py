@@ -65,6 +65,12 @@ def write_config(*, data_dir: Path, api_key: str, agent_name: str = AGENT_NAME) 
     cfg_path, state_dir, audit_path = agent_paths(data_dir, agent_name)
     for d in (cfg_path.parent, state_dir, audit_path.parent):
         d.mkdir(parents=True, exist_ok=True)
+    # Persist to OS keyring as well as TOML so steady-state operation
+    # can use the keyring (audit F-WD-003, 2026-05-01). The installer
+    # path doesn't yet know endpoint_id, so we store under "default".
+    # `logicd enroll` will overwrite with the proper endpoint_id key.
+    from .config import write_api_key as _write_keyring
+    _write_keyring("", api_key)
     content = dedent(f"""
         # GhostLogic Agent Watchdog config for the internal logicd daemon.
         # Endpoint-isolation v1 layout: this file lives under

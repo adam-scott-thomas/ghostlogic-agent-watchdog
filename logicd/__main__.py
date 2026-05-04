@@ -45,6 +45,18 @@ def main() -> int:
     run_p = sub.add_parser("run", help="Run the forwarder in foreground")
     run_p.add_argument("--config", required=True, help="Path to config.toml")
 
+    mig_p = sub.add_parser(
+        "migrate-key",
+        help="Move api.key from the TOML literal into the OS keyring "
+             "(audit F-WD-003). Default is dry-run: pass --commit to "
+             "actually blank out the TOML literal once you've verified "
+             "the daemon still starts using the keyring entry.",
+    )
+    mig_p.add_argument("--config", required=True, help="Path to config.toml")
+    mig_p.add_argument("--commit", action="store_true",
+                       help="Actually blank out api.key in the TOML file "
+                            "(default is dry-run that only writes to keyring)")
+
     args, unknown = parser.parse_known_args()
     if args.cmd == "install":
         extra = []
@@ -65,7 +77,63 @@ def main() -> int:
         return run_enroll(forwarded + unknown)
     if args.cmd == "run":
         return _run(Path(args.config))
+    if args.cmd == "migrate-key":
+        return _migrate_key(Path(args.config), commit=args.commit)
     return 1
+
+
+def _migrate_key(config_path: Path, *, commit: bool) -> int:
+    """Copy api.key from TOML to OS keyring. With --commit, blank the
+    TOML literal so the next start sources from keyring only.
+
+    Audit ref: F-WD-003 (2026-05-01)."""
+    import tomllib as _tomllib
+    from .config import write_api_key as _write_keyring
+
+    if not config_path.exists():
+        print(f"ERROR: config not found: {config_path}", file=sys.stderr)
+        return 1
+    with config_path.open("rb") as f:
+        raw = _tomllib.load(f)
+    api = raw.get("api", {})
+    toml_key = str(api.get("key", "") or "")
+    endpoint_id = str(api.get("endpoint_id", "") or "")
+    if not toml_key:
+        print("Nothing to migrate: api.key in the TOML is already blank.")
+        return 0
+
+    ok = _write_keyring(endpoint_id, toml_key)
+    if not ok:
+        print("ERROR: keyring write failed. Refusing to blank the TOML "
+              "literal — without keyring backing, the daemon would have "
+              "no key to read.", file=sys.stderr)
+        return 1
+    print(f"Wrote key to OS keyring (service=ghostlogic-agent-watchdog, "
+          f"username=api_key:{endpoint_id or 'default'}).")
+
+    if not commit:
+        print("Dry-run only. Re-run with --commit to blank the TOML literal.")
+        return 0
+
+    # Blank api.key in the TOML, preserving the rest of the file.
+    text = config_path.read_text(encoding="utf-8")
+    import re as _re
+    new_text, n = _re.subn(
+        r'^(\s*key\s*=\s*)"[^"\n]*"',
+        r'\1""',
+        text,
+        count=1,
+        flags=_re.MULTILINE,
+    )
+    if n == 0:
+        print("WARN: could not find the api.key literal to blank in the "
+              "TOML. The keyring write succeeded; manually clear the line "
+              "if you want plaintext gone.", file=sys.stderr)
+        return 0
+    config_path.write_text(new_text, encoding="utf-8")
+    print(f"Blanked api.key in {config_path}. Daemon will now read from "
+          "the OS keyring.")
+    return 0
 
 
 def _run(config_path: Path) -> int:

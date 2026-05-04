@@ -51,6 +51,10 @@ dependencies = [
     "aiohttp>=3.9",
     "watchdog>=4.0",
     "ghostspine>=0.3.0",
+    # OS keyring (Windows Credential Manager / macOS Keychain / Linux
+    # Secret Service). Used to store the API key out of plaintext TOML.
+    # Audit ref: F-WD-003 (2026-05-01).
+    "keyring>=24",
 ]
 
 [project.optional-dependencies]
