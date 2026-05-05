@@ -53,23 +53,32 @@ DEMO_AGENT_NAME = "logicd-demo"
 DEMO_API_URL = "https://api.ghostlogic.tech"
 DEMO_DASHBOARD_URL = "https://blackbox.ghostlogic.tech/demo"
 
-# The pre-provisioned demo key. Two ways to populate it:
-#   1. Set GHOSTLOGIC_DEMO_KEY in the environment at install time. The
-#      installer (this module) reads it and bakes it into the demo
-#      config file. Recommended for a real demo: the build/CI flow
-#      sets the env var to the operator-minted demo key.
-#   2. Hardcode here at release-time substitution (e.g. via sed in a
-#      release script). Leave the placeholder as-is in the repo.
+# The pre-provisioned demo key. Resolution order:
+#   1. GHOSTLOGIC_DEMO_KEY env var (overrides everything; the rotation
+#      lever — change the value server-side, set the env var on demo
+#      installs, agents pick it up at next `demo-dog` run).
+#   2. The built-in fallback below. Public by design — the only thing
+#      this key can do is ingest into the `ghostlogic-demo` tenant
+#      with role=ingester (server-side enforced; see
+#      docs/DEMO_TENANT_SERVER_SPEC.md). Anyone running `demo-dog`
+#      with no env var falls through to this.
 #
-# Either way, the operator MUST mint the demo key server-side first
-# (see DEMO_TENANT_SERVER_SPEC.md) and ensure it has role=ingester only.
+# To rotate after a demo window: mint a new value server-side under
+# the same tenant + role, distribute the new value via the env var,
+# and on a future release update the constant below to match. There
+# is intentionally no "secret" handling for this key.
 _DEMO_KEY_ENV_VAR = "GHOSTLOGIC_DEMO_KEY"
-_DEMO_KEY_PLACEHOLDER = "gl_agent_demo_PLACEHOLDER_REPLACE_BEFORE_RELEASE"
+_BUILTIN_DEMO_KEY = "gl_demo_74003b12f95d4b93beb46e8c925474eb"
 
 
-def _resolve_demo_key() -> str:
-    """Pull the demo key from env or fall through to the placeholder."""
-    return os.environ.get(_DEMO_KEY_ENV_VAR, _DEMO_KEY_PLACEHOLDER)
+def _resolve_demo_key() -> tuple[str, str]:
+    """Resolve the demo key. Returns (key, source) where source is
+    either "env" or "builtin" so the caller can print an appropriate
+    banner without re-doing the lookup."""
+    env_value = os.environ.get(_DEMO_KEY_ENV_VAR, "").strip()
+    if env_value:
+        return env_value, "env"
+    return _BUILTIN_DEMO_KEY, "builtin"
 
 
 # ---------------------------------------------------------------------------
@@ -180,17 +189,7 @@ def run_demo_dog(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    api_key = _resolve_demo_key()
-    if api_key == _DEMO_KEY_PLACEHOLDER:
-        print(
-            "ERROR: demo key not configured.\n"
-            f"  Set {_DEMO_KEY_ENV_VAR} in the environment, or replace the\n"
-            f"  placeholder in logicd/demo.py at release time. The demo\n"
-            f"  key must be minted server-side first with role=ingester\n"
-            f"  on tenant {DEMO_TENANT!r}.",
-            file=sys.stderr,
-        )
-        return 2
+    api_key, source = _resolve_demo_key()
 
     data_dir = Path(args.data_dir).expanduser() if args.data_dir else default_data_dir()
     endpoint_name = args.endpoint_name or socket.gethostname()
@@ -213,6 +212,10 @@ def run_demo_dog(argv: list[str] | None = None) -> int:
     print(f"  config:       {cfg_path}")
     print(f"  dashboard:    {DEMO_DASHBOARD_URL}")
     print()
+    if source == "builtin":
+        print("  Demo Mode: using public demo ingest key. Not for production.")
+    else:
+        print(f"  Demo Mode: using {_DEMO_KEY_ENV_VAR} (env override).")
     print("  Demo keys are ingester-only. The dashboard reads through")
     print("  a scoped read-only path on the server side; this agent")
     print("  never reads data.")

@@ -19,8 +19,9 @@ from logicd.demo import (
     DEMO_API_URL,
     DEMO_DASHBOARD_URL,
     DEMO_TENANT,
+    _BUILTIN_DEMO_KEY,
     _DEMO_KEY_ENV_VAR,
-    _DEMO_KEY_PLACEHOLDER,
+    _resolve_demo_key,
     run_demo_dog,
     write_demo_config,
 )
@@ -103,36 +104,84 @@ def test_demo_config_text_carries_demo_block_label(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_run_demo_dog_errors_when_demo_key_unset(tmp_path, monkeypatch, capsys):
-    """If neither GHOSTLOGIC_DEMO_KEY nor a release-time substitution
-    is in place, refuse to write a config with the placeholder."""
-    monkeypatch.delenv(_DEMO_KEY_ENV_VAR, raising=False)
-    rc = run_demo_dog(["--data-dir", str(tmp_path), "--endpoint-name", "h"])
-    assert rc == 2
-    err = capsys.readouterr().err
-    assert "demo key not configured" in err
-    assert _DEMO_KEY_ENV_VAR in err
-
-
-def test_run_demo_dog_writes_config_when_key_provided(tmp_path, monkeypatch, capsys):
+def test_resolve_demo_key_returns_env_when_set(monkeypatch):
     monkeypatch.setenv(_DEMO_KEY_ENV_VAR, "gl_agent_demo_envkey")
-    rc = run_demo_dog([
-        "--data-dir", str(tmp_path),
-        "--endpoint-name", "envhost",
-    ])
+    key, source = _resolve_demo_key()
+    assert key == "gl_agent_demo_envkey"
+    assert source == "env"
+
+
+def test_resolve_demo_key_returns_builtin_when_env_unset(monkeypatch):
+    monkeypatch.delenv(_DEMO_KEY_ENV_VAR, raising=False)
+    key, source = _resolve_demo_key()
+    assert key == _BUILTIN_DEMO_KEY
+    assert source == "builtin"
+
+
+def test_resolve_demo_key_treats_blank_env_as_unset(monkeypatch):
+    """A whitespace-only GHOSTLOGIC_DEMO_KEY must NOT pin a config to
+    an empty key — fall through to the built-in instead. This guards
+    against shell scripts that export the var as empty when unset."""
+    monkeypatch.setenv(_DEMO_KEY_ENV_VAR, "   ")
+    key, source = _resolve_demo_key()
+    assert key == _BUILTIN_DEMO_KEY
+    assert source == "builtin"
+
+
+def test_run_demo_dog_uses_builtin_key_when_env_unset(tmp_path, monkeypatch, capsys):
+    """Adam's directive: demo-dog must work with NO user input. Even
+    when GHOSTLOGIC_DEMO_KEY is not set, the command writes a usable
+    config using the built-in public demo key."""
+    monkeypatch.delenv(_DEMO_KEY_ENV_VAR, raising=False)
+    rc = run_demo_dog(["--data-dir", str(tmp_path), "--endpoint-name", "builtinhost"])
     assert rc == 0
     cfg_path = tmp_path / "agents" / f"{DEMO_AGENT_NAME}.toml"
     assert cfg_path.exists()
     cfg = Config.load(cfg_path)
     assert cfg.demo_mode is True
-    assert cfg.api_key == "gl_agent_demo_envkey"
+    assert cfg.api_key == _BUILTIN_DEMO_KEY
 
-    # Stdout banner: dashboard URL + start command must be present so
-    # the user knows where to look and how to run.
     out = capsys.readouterr().out
+    # The exact line Adam asked for:
+    assert "Demo Mode: using public demo ingest key. Not for production." in out
     assert DEMO_DASHBOARD_URL in out
     assert "logicd run --config" in out
-    assert "Demo Mode" in out
+
+
+def test_run_demo_dog_env_override_takes_precedence(tmp_path, monkeypatch, capsys):
+    """When the rotation lever is in use, env overrides built-in.
+    Banner reflects the override path explicitly."""
+    monkeypatch.setenv(_DEMO_KEY_ENV_VAR, "gl_agent_demo_envkey")
+    rc = run_demo_dog(["--data-dir", str(tmp_path), "--endpoint-name", "envhost"])
+    assert rc == 0
+    cfg_path = tmp_path / "agents" / f"{DEMO_AGENT_NAME}.toml"
+    cfg = Config.load(cfg_path)
+    assert cfg.api_key == "gl_agent_demo_envkey"
+    assert cfg.api_key != _BUILTIN_DEMO_KEY
+
+    out = capsys.readouterr().out
+    # Different banner line on the env-override path.
+    assert _DEMO_KEY_ENV_VAR in out
+    assert "env override" in out
+    # Make sure the public-key line is NOT printed when env is in use.
+    assert "using public demo ingest key" not in out
+
+
+def test_run_demo_dog_does_not_prompt_for_input(tmp_path, monkeypatch):
+    """Hard rule: demo-dog must not call input() / read stdin. Test by
+    replacing stdin with something that would fail loudly if read."""
+    monkeypatch.delenv(_DEMO_KEY_ENV_VAR, raising=False)
+
+    class _NoStdin:
+        def read(self, *a, **kw):
+            raise AssertionError("demo-dog must not read stdin")
+
+        def readline(self, *a, **kw):
+            raise AssertionError("demo-dog must not read stdin")
+
+    monkeypatch.setattr("sys.stdin", _NoStdin())
+    rc = run_demo_dog(["--data-dir", str(tmp_path), "--endpoint-name", "noprompthost"])
+    assert rc == 0
 
 
 def test_run_demo_dog_does_not_write_to_keyring(tmp_path, monkeypatch):

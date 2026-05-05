@@ -36,13 +36,33 @@ Generate the key value with whatever shape your live keys use (matching prefix +
 
 **Provisioning the key into the agent install:**
 
-```bash
-# At install / build time on the agent host:
-export GHOSTLOGIC_DEMO_KEY="<DEMO_KEY_VALUE>"
-python -m logicd demo-dog
+The agent **ships with a built-in public demo ingest key**:
+
+```
+gl_demo_74003b12f95d4b93beb46e8c925474eb
 ```
 
-The `demo-dog` command reads `GHOSTLOGIC_DEMO_KEY` from env and bakes it into `<data_dir>/agents/logicd-demo.toml`. If unset, it errors and refuses to write a config (refuses the placeholder). For a packaged release, substitute the placeholder at build time via sed/rewrite.
+`logicd demo-dog` works with no environment, no prompt, no operator step:
+
+```bash
+python -m logicd demo-dog
+# → "Demo Mode: using public demo ingest key. Not for production."
+```
+
+The `GHOSTLOGIC_DEMO_KEY` env var still exists as the **rotation lever**:
+
+```bash
+GHOSTLOGIC_DEMO_KEY="<rotated-demo-key>" python -m logicd demo-dog
+# → "Demo Mode: using GHOSTLOGIC_DEMO_KEY (env override)."
+```
+
+When you rotate the demo key server-side (per §4 below), the steps are:
+1. Mint the new value in `/etc/blackbox/keys.json` (both old + new valid for the overlap).
+2. Distribute the new value via `GHOSTLOGIC_DEMO_KEY` for any installs that should use the new key right now (or wait for the next agent release).
+3. Bump `_BUILTIN_DEMO_KEY` in `logicd/demo.py` to match for the next agent release.
+4. Delete the old value from `keys.json`.
+
+The built-in key is **public by design** — committed in plaintext to the repo (current value above), in the wheel, and printed by the agent. The security envelope rests on server-side enforcement: this key MUST be `role: ingester` (no reads), bound to the `ghostlogic-demo` tenant, and that tenant MUST be isolated from real customer data.
 
 ---
 
