@@ -145,7 +145,14 @@ def test_run_demo_dog_uses_builtin_key_when_env_unset(tmp_path, monkeypatch, cap
     # The exact line Adam asked for:
     assert "Demo Mode: using public demo ingest key. Not for production." in out
     assert DEMO_DASHBOARD_URL in out
-    assert "logicd run --config" in out
+    # Without --start, demo-dog prints the exact next command to run
+    # (single line, easy to copy).
+    assert "Next: run the daemon with this exact command:" in out
+    assert "python -m logicd run --config" in out
+    assert str(cfg_path) in out
+    # Without --start the banner about foreground-mode MUST NOT print.
+    assert "Demo agent is now running in this terminal." not in out
+    assert "Ctrl+C" not in out
 
 
 def test_run_demo_dog_env_override_takes_precedence(tmp_path, monkeypatch, capsys):
@@ -165,6 +172,77 @@ def test_run_demo_dog_env_override_takes_precedence(tmp_path, monkeypatch, capsy
     assert "env override" in out
     # Make sure the public-key line is NOT printed when env is in use.
     assert "using public demo ingest key" not in out
+
+
+def test_run_demo_dog_start_prints_foreground_banner_then_runs_daemon(
+    tmp_path, monkeypatch, capsys,
+):
+    """With --start, demo-dog must print the foreground-mode banner
+    BEFORE invoking the daemon. We mock _run so the test doesn't try
+    to spin up the real spine / aiohttp loop, and we record the order
+    of operations to prove banner-then-run."""
+    monkeypatch.delenv(_DEMO_KEY_ENV_VAR, raising=False)
+
+    sequence: list[str] = []
+
+    def fake_run(config_path: Path) -> int:
+        sequence.append(f"_run({config_path.name})")
+        return 0
+
+    # Patch the import target the demo module reaches for. The module
+    # does `from .__main__ import _run as _run_daemon` lazily inside
+    # the if-args.start branch.
+    import logicd.__main__ as main_mod
+    monkeypatch.setattr(main_mod, "_run", fake_run)
+
+    # Capture stdout up to the moment _run is invoked, then capture
+    # what comes after — but capsys captures in chunks, so easier:
+    # have fake_run record a sentinel and then read all stdout once.
+    rc = run_demo_dog([
+        "--data-dir", str(tmp_path),
+        "--endpoint-name", "fghost",
+        "--start",
+    ])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    # All four exact lines from the foreground banner — wording
+    # locked in the spec.
+    assert "Demo agent is now running in this terminal." in out
+    assert "Keep this window open." in out
+    assert "Close it or press Ctrl+C to stop sending demo events." in out
+    assert f"Open {DEMO_DASHBOARD_URL} in your browser." in out
+
+    # Ordering: the foreground banner must appear BEFORE the bottom of
+    # stdout (i.e., before _run would have started writing daemon logs
+    # in the real flow). We can't fully verify that without real I/O
+    # interleaving, but we can assert (a) the banner text is in the
+    # captured stdout and (b) _run was called exactly once with the
+    # demo config path.
+    assert sequence == ["_run(logicd-demo.toml)"]
+
+    # The "no --start" hint MUST NOT print on the --start path —
+    # otherwise we'd be telling the user to also run the daemon
+    # manually, which would be confusing.
+    assert "Next: run the daemon with this exact command:" not in out
+
+
+def test_run_demo_dog_start_propagates_daemon_exit_code(
+    tmp_path, monkeypatch,
+):
+    """If the daemon exits non-zero (auth-fatal, etc.), --start must
+    surface that exit code rather than swallowing it as success."""
+    monkeypatch.delenv(_DEMO_KEY_ENV_VAR, raising=False)
+    import logicd.__main__ as main_mod
+    monkeypatch.setattr(main_mod, "_run", lambda _p: 3)
+
+    rc = run_demo_dog([
+        "--data-dir", str(tmp_path),
+        "--endpoint-name", "exitcodehost",
+        "--start",
+    ])
+    assert rc == 3
 
 
 def test_run_demo_dog_does_not_prompt_for_input(tmp_path, monkeypatch):

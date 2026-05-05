@@ -220,14 +220,32 @@ def run_demo_dog(argv: list[str] | None = None) -> int:
     print("  a scoped read-only path on the server side; this agent")
     print("  never reads data.")
     print()
-    print("  To start the daemon:")
-    print(f"    python -m logicd run --config {cfg_path}")
-    print()
 
     if args.start:
-        # Lazy import so `demo-dog` doesn't pay the spine/aiohttp boot cost
-        # just to write a config.
+        # --start: foreground daemon. Print the foreground-mode banner
+        # so an end-user running this in a terminal knows what's about
+        # to happen before tokio/aiohttp output starts scrolling.
+        print(_foreground_run_banner())
+        # Lazy import so `demo-dog` (without --start) doesn't pay the
+        # spine/aiohttp boot cost just to write a config.
         from .__main__ import _run as _run_daemon
         return _run_daemon(cfg_path)
 
+    # No --start: print the exact next command to run. Single line,
+    # easy to copy.
+    print("  Next: run the daemon with this exact command:")
+    print(f"    python -m logicd run --config {cfg_path}")
+    print()
     return 0
+
+
+def _foreground_run_banner() -> str:
+    """The foreground-run guidance printed immediately before
+    `logicd demo-dog --start` invokes the daemon. Pulled into a
+    helper so tests can lock the wording."""
+    return (
+        "  Demo agent is now running in this terminal.\n"
+        "  Keep this window open.\n"
+        "  Close it or press Ctrl+C to stop sending demo events.\n"
+        f"  Open {DEMO_DASHBOARD_URL} in your browser.\n"
+    )
