@@ -10,6 +10,7 @@ from spine import Core
 
 from .client import KeyRevokedOrUnauthorized
 from .config import Config
+from .demo import run_demo_dog
 from .enroll import run_enroll
 from .installer import run_installer
 from .watcher import Forwarder
@@ -45,6 +46,18 @@ def main() -> int:
     run_p = sub.add_parser("run", help="Run the forwarder in foreground")
     run_p.add_argument("--config", required=True, help="Path to config.toml")
 
+    # Demo-dog onboarding (separate from `enroll`; pre-provisioned key,
+    # ingester-only role, ghostlogic-demo tenant). Production path is
+    # untouched. See logicd/demo.py for the security envelope.
+    demo_p = sub.add_parser(
+        "demo-dog",
+        help="Onboard into the GhostLogic demo tenant (ingester-only, isolated)",
+    )
+    demo_p.add_argument("--data-dir", help="Override the GhostLogic data directory")
+    demo_p.add_argument("--endpoint-name", help="Override endpoint label (default: hostname)")
+    demo_p.add_argument("--api-url", help="Override demo API URL")
+    demo_p.add_argument("--start", action="store_true", help="Start daemon after writing config")
+
     mig_p = sub.add_parser(
         "migrate-key",
         help="Move api.key from the TOML literal into the OS keyring "
@@ -79,6 +92,17 @@ def main() -> int:
         return _run(Path(args.config))
     if args.cmd == "migrate-key":
         return _migrate_key(Path(args.config), commit=args.commit)
+    if args.cmd == "demo-dog":
+        forwarded: list[str] = []
+        if args.data_dir:
+            forwarded += ["--data-dir", args.data_dir]
+        if args.endpoint_name:
+            forwarded += ["--endpoint-name", args.endpoint_name]
+        if args.api_url:
+            forwarded += ["--api-url", args.api_url]
+        if args.start:
+            forwarded += ["--start"]
+        return run_demo_dog(forwarded + unknown)
     return 1
 
 
@@ -138,6 +162,18 @@ def _migrate_key(config_path: Path, *, commit: bool) -> int:
 
 def _run(config_path: Path) -> int:
     cfg = Config.load(config_path)
+    if cfg.demo_mode:
+        # Visually obvious so an operator skimming logs can't miss it.
+        # Audit ref: demo-mode onboarding (2026-05-04). Production
+        # `logicd enroll` configs leave demo_mode=False so this banner
+        # never fires for paying / live users.
+        print("=" * 60, file=sys.stderr)
+        print(" GhostLogic — DEMO MODE", file=sys.stderr)
+        print(f"   tenant:    {cfg.demo_tenant or '(unset)'}", file=sys.stderr)
+        print(f"   dashboard: {cfg.dashboard_url or '(unset)'}", file=sys.stderr)
+        print(" Demo keys are ingester-only. Reads happen through the", file=sys.stderr)
+        print(" dashboard's scoped path, not this agent.", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
     spine = Core()
     spine.register("logicd.config_path", config_path.resolve())
     spine.register("logicd.config", cfg)

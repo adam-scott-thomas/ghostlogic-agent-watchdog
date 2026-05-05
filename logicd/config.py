@@ -148,6 +148,15 @@ class Config:
     # endpoint isolation v1 (audit F-WD-002, 2026-05-01) — empty string
     # signals "fall back to hostname-only identity on the wire".
     endpoint_id: str = ""
+    # Demo-mode fields (2026-05-04). Populated by `logicd demo-dog`;
+    # production `logicd enroll` leaves these at defaults. demo_mode
+    # is the load-bearing flag: the daemon prints a "Demo Mode"
+    # banner + dashboard URL when it's true, and operators reading
+    # logs / configs can tell which mode they're looking at without
+    # inspecting the API key prefix.
+    demo_mode: bool = False
+    demo_tenant: str = ""
+    dashboard_url: str = ""
 
     @staticmethod
     def load(path: str | Path) -> "Config":
@@ -158,6 +167,7 @@ class Config:
         api = raw.get("api", {})
         tick = raw.get("tick", {})
         priv = raw.get("privacy", {})
+        demo = raw.get("demo", {})
         watches = tuple(
             WatchEntry(
                 name=w["name"],
@@ -190,4 +200,7 @@ class Config:
             privacy=privacy,
             heartbeat_seconds=int(raw.get("heartbeat_seconds", 60)),
             endpoint_id=endpoint_id,
+            demo_mode=bool(demo.get("mode", False)),
+            demo_tenant=str(demo.get("tenant", "") or ""),
+            dashboard_url=str(demo.get("dashboard_url", "") or ""),
         )
