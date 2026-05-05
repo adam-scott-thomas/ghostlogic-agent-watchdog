@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ghostlogic-agent-watchdog"
-version = "0.1.0"
+version = "0.2.0"
 description = "Forensic forwarder for AI-agent coding sessions (Claude Code, Codex CLI). Tick-batches transcripts and ships tamper-evident receipts to GhostLogic Blackbox."
 readme = "README.md"
 requires-python = ">=3.11"
