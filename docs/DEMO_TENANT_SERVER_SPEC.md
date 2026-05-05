@@ -60,19 +60,90 @@ The demo tenant `ghostlogic-demo` MUST be isolated from real tenants. Concretely
 
 **Route:** `https://blackbox.ghostlogic.tech/demo` (the dashboard host, NOT the API host).
 
-**Hard requirements:**
+### 3.1 Dashboard side — already shipped 2026-05-05
+
+The dashboard portion is built in `Ghost_Logic/blackbox-console/`:
+
+- New `src/app/Demo.tsx` shell, mounted by `src/main.tsx` when `window.location.pathname` starts with `/demo`. Production `App.tsx` is untouched.
+- New `src/api/demo.ts` client — read-only fetch helpers, **never sends `Authorization`**, no tenant/admin key access.
+- Persistent "Demo Mode" banner (sticky, not dismissible). Tenant name surfaces from the API response.
+- Live endpoints panel + recent events stream. Both auto-refresh every 5s via `setInterval`.
+- 9 unit tests enforcing no-auth-header, no-credentials-in-source, demo-only path prefixing, isolation from production client.
+- No `react-router-dom` dependency — single pathname check at mount selects the shell.
+
+The dashboard expects a backend-proxy implementation of three GET endpoints, documented in §3.2. Until those endpoints exist server-side, `/demo` will render the "demo-api unreachable" status strip and empty panels.
+
+### 3.2 Backend contract — the three endpoints the dashboard calls
+
+All three are **public** (no `Authorization` required), **rate-limited per IP**, **tenant-locked server-side to `ghostlogic-demo`**, and **GET-only**. The server is responsible for filtering the response so cross-tenant data cannot leak.
+
+#### `GET /api/v1/demo/status`
+
+Response (200):
+
+```json
+{
+  "tenant": "ghostlogic-demo",
+  "endpoints_active": 3,
+  "events_last_hour": 142,
+  "server_time": "2026-05-05T00:00:00Z"
+}
+```
+
+Used to populate the status strip below the banner. `endpoints_active` is the count of demo endpoints with a heartbeat or batch within the last 5 minutes. `events_last_hour` is total events ingested under `tenant=ghostlogic-demo` in the last 60 minutes.
+
+#### `GET /api/v1/demo/endpoints`
+
+Response (200):
+
+```json
+[
+  {
+    "endpoint_id": "11111111-1111-4111-8111-111111111111",
+    "endpoint_name": "demo-host-A",
+    "hostname": "demo-host-A",
+    "last_seen": "2026-05-05T00:00:00Z",
+    "events_total": 17
+  }
+]
+```
+
+List of endpoints in the demo tenant. Empty array is a valid response — the UI renders an "onboard via `python -m logicd demo-dog`" hint.
+
+#### `GET /api/v1/demo/buffer/recent?limit=N`
+
+Response (200):
+
+```json
+[
+  {
+    "timestamp": "2026-05-05T00:00:00Z",
+    "source_id": "demo-host-A",
+    "endpoint_name": "demo-host-A",
+    "event_type": "process_start"
+  }
+]
+```
+
+`limit` ≤ 100 server-side enforced. Returned events MUST be redacted of any field that could leak across tenants (no `tenant_id` echoed in the payload, no API-key prefixes, no internal IDs other than `endpoint_id`/`endpoint_name`/`source_id`).
+
+### 3.3 Hard server-side requirements
 
 - **The demo ingester key MUST NOT be embedded in the client.** Browsers should never see it.
 - **No user-supplied API key for demo mode.** A visitor lands on `/demo` and sees data. They don't paste anything.
-- **Read path uses one of:**
-  - **(Recommended) Backend proxy.** The Next.js server (or whatever the dashboard runtime is) holds a separate **read-only key** for `tenant: ghostlogic-demo` in server-side env. `/demo`'s `getServerSideProps` / route handlers proxy filtered queries to `api.ghostlogic.tech` with that key. Client-side JS never touches a key.
-  - **Fallback: scoped read-only token issued per session.** The dashboard mints a short-lived session token bound to `tenant: ghostlogic-demo` + read-only role + IP, hands it to the client, and the API enforces TTL. Higher engineering cost; only do this if the proxy approach doesn't fit your stack.
-- **`Demo Mode` visual label.** Persistent banner (not a toast) at the top of every `/demo` page, with the tenant name + a link out to the production sign-up page. This is per the workstation onboarding banner; users who shipped from the agent should see the same framing on the dashboard.
-- **No admin keys.** Dashboard should have zero admin endpoints reachable from `/demo`. List, revoke, mint — none of those should be hit from the demo route, even server-side.
+- **Tenant filter is hardcoded at the endpoint, not derived from a request header.** Even if a caller sent an `Authorization` header, it MUST NOT be honoured for /demo paths — those paths read only `ghostlogic-demo` data, regardless of who's asking.
+- **Rate limit per IP**: e.g. 30 req/min. Use the existing rate-limit middleware. 429 on excess.
+- **CORS**: the dashboard at `blackbox.ghostlogic.tech` should be in the `Access-Control-Allow-Origin` allowlist for these three GET paths only. No credentials forwarded.
+- **No admin or tenant key sourcing.** The endpoints either:
+  - **Use a hardcoded server-side `tenant_id == "ghostlogic-demo"` filter on the data layer** (no key lookup at all — recommended; fewer moving parts), OR
+  - Use a server-side env-baked `DASHBOARD_DEMO_READ_KEY` with role=reader to call the existing read endpoints internally.
+  Either is fine. The hardcoded-tenant approach has fewer keys to rotate.
+- **No write paths.** Do not add `POST /api/v1/demo/*`. Demo agents POST to the standard `/api/v1/ingest` with the demo ingester key (per §1); the demo dashboard never writes.
+- **`Demo Mode` visual label.** Already implemented in `Demo.tsx` (sticky amber banner). Server-side changes should not degrade this framing.
 
-**Provisioning the dashboard's read-only demo key:**
+### 3.4 Optional: `DASHBOARD_DEMO_READ_KEY`
 
-Mint a separate key in `/etc/blackbox/keys.json` for the dashboard, like:
+If you choose the env-baked-reader-key approach over the hardcoded-tenant-filter approach, mint a separate key in `/etc/blackbox/keys.json`:
 
 ```json
 {
@@ -87,7 +158,7 @@ Mint a separate key in `/etc/blackbox/keys.json` for the dashboard, like:
 }
 ```
 
-The dashboard pulls this from env (`DEMO_READ_KEY` or 1Password) at boot. Rotate by editing `keys.json` + bouncing the dashboard.
+The API server reads this from env (`DEMO_READ_KEY` or 1Password) on boot and uses it server-side only. Never proxied to the client. Rotate by editing `keys.json` + restarting the API service.
 
 ---
 
